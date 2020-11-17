@@ -225,6 +225,8 @@ def test_method_listener_inheritance():
         def eggs(self):
             self.items.append("hameggs")
 
+    event_handler.bind_owner(Ham)
+
     things = []
     ham = Ham(things)
     event_handler.bind(ham)
@@ -330,3 +332,90 @@ def test_combined_listeners_unqiue_error_at_function():
         @event_handler.on("spam", unique=True)
         def spam_function():
             ...
+
+
+def test_future_event():
+    event_handler = events.EventHandler()
+
+    class Spam:
+        @event_handler.on("spam")
+        def spam(self, ham):
+            ...
+
+    spam = Spam()
+    event_handler.bind(spam)
+
+    future = event_handler.get_future_event("spam", ham=True)
+
+    assert event_handler.dispatch("spam", ham=False) == 1
+    assert not future.done()
+
+    assert event_handler.dispatch("spam", ham=True) == 2
+    assert future.result() == dict(ham=True)
+
+
+def test_future_event_error():
+    event_handler = events.EventHandler()
+
+    class Spam:
+        @event_handler.on("spam")
+        def spam(self, ham):
+            raise RuntimeError("spam")
+
+    spam = Spam()
+    event_handler.bind(spam)
+
+    future = event_handler.get_future_event("spam")
+
+    with pytest.raises(RuntimeError):
+        event_handler.dispatch("spam", ham="ham")
+
+    assert future.result() == dict(ham="ham")
+
+
+def test_future_event_predicate_error():
+    event_handler = events.EventHandler()
+
+    class Spam:
+        @event_handler.on("spam")
+        def spam(self, ham):
+            ...
+
+    def pred(ham):
+        raise RuntimeError
+
+    spam = Spam()
+    event_handler.bind(spam)
+
+    future = event_handler.get_future_event("spam", predicate=pred)
+
+    with pytest.raises(RuntimeError):
+        event_handler.dispatch("spam", ham="ham")
+
+    with pytest.raises(RuntimeError):
+        future.result()
+
+
+def test_ignore():
+    event_handler = events.EventHandler()
+
+    class Spam:
+        def __init__(self, items):
+            self.items = items
+
+        @event_handler.on("spam")
+        def spam(self):
+            self.items.append("eggs")
+
+    spam_things = []
+    spam = Spam(spam_things)
+
+    event_handler.bind(spam)
+
+    with event_handler.ignore_listeners("spam"):
+        event_handler.dispatch("spam")
+
+    assert not spam_things
+
+    event_handler.dispatch("spam")
+    assert spam_things

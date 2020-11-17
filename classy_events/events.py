@@ -383,7 +383,7 @@ class BaseEventHandler(Generic[LT, ET, FT]):
             listeners[event].append(listener)
 
     def register_listener_owner(self, listener: LT, owner: Type[T], name: str):
-        if name in self.__owner_listener_map:
+        if name in self.__owner_listener_map:  # pragma: no cover
             raise KeyError(f"listener '{name}' already registered for {owner}")
         self.__owner_listener_map[owner][name] = listener
 
@@ -417,7 +417,7 @@ class BaseEventHandler(Generic[LT, ET, FT]):
                 except Exception as e:
                     future.set_exception(e)
                     self._handle_predicate_exception(event, e)
-                    continue
+                    raise
                 else:
                     future.set_result(kwargs)
                     notified += 1
@@ -428,7 +428,7 @@ class BaseEventHandler(Generic[LT, ET, FT]):
         return listener(**kwargs)
 
     def _handle_predicate_exception(self, event: ET, exception: BaseException):
-        ...
+        ...  # pragma: no cover
 
     def _get_owner_listeners(self, event: ET, owner: Type[T]) -> Iterator[LT]:
         _names = set()
@@ -443,7 +443,7 @@ class BaseEventHandler(Generic[LT, ET, FT]):
         _owners = set()
         for listener in self.__listener_methods[event]:
             if (owner := listener.owner) is None:
-                continue
+                continue  # pragma: no cover
 
             if owner in _owners:
                 continue
