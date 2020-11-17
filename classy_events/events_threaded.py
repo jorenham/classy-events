@@ -91,7 +91,7 @@ class BaseSyncedEventHandler(BaseEventHandler[LT, ET, FT], Generic[LT, ET, FT]):
         self._sync_scopes: Dict[ET, str] = {}
         self._sync_locks: Dict[str, Lockable] = ddict(threading.Lock)
 
-        self._event_lock = threading.Lock()
+        self._event_lock = threading.RLock()
 
     def on(
         self,
