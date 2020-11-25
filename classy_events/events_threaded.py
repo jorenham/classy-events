@@ -89,8 +89,6 @@ class BaseSyncedEventHandler(BaseEventHandler[LT, ET, FT], Generic[LT, ET, FT]):
     def __init__(self):
         super().__init__()
 
-        self._exception_handlers: List[ExceptionHandler] = []
-
         self._sync_scopes: Dict[ET, str] = {}
         self._sync_locks: Dict[str, Lockable] = ddict(threading.Lock)
 
@@ -116,10 +114,6 @@ class BaseSyncedEventHandler(BaseEventHandler[LT, ET, FT], Generic[LT, ET, FT]):
         """
         return super().on(*events, unique=unique, sync=sync, **kwargs)
 
-    def on_exception(self, fn: ExceptionHandler) -> ExceptionHandler:
-        self._exception_handlers.append(fn)
-        return fn
-
     def bind(self, instance: T):
         if instance in self._instances:
             raise ValueError(f"instance {instance} already bound")
@@ -132,27 +126,9 @@ class BaseSyncedEventHandler(BaseEventHandler[LT, ET, FT], Generic[LT, ET, FT]):
             super().unbind(instance)
 
     def _dispatch_listener(self, event: ET, listener: LT, **kwargs):
-        try:
-            with self._event_lock:
-                return super()._dispatch_listener(  # noqa
-                    event, listener, _event=event, **kwargs
-                )
-        except Exception as e:
-            self._handle_listener_exception(listener, event, e)
-            raise
-
-    def _handle_listener_exception(
-        self, listener: LT, event: ET, exception: BaseException
-    ):
-        if self._exception_handlers:
-            for handler in self._exception_handlers:
-                handler(listener, event, exception)
-        else:
-            self.logger.exception(
-                "exception in synced event listener '%s' for event '%s': %s",
-                str(listener),
-                str(event),
-                str(exception),
+        with self._event_lock:
+            return super()._dispatch_listener(  # noqa
+                event, listener, _event=event, **kwargs
             )
 
 
