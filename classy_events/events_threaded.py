@@ -20,7 +20,6 @@ from typing import (
     Dict,
     Generic,
     List,
-    Tuple,
     TypeVar,
     Union,
 )
@@ -80,6 +79,8 @@ class BaseSyncedEventHandler(BaseEventHandler[LT, ET, FT], Generic[LT, ET, FT]):
     Syncs events with an optionally specified scopes.
     Useful when the events are dispatch in different threads.
     """
+
+    __event_listener_type__ = SyncedEventListener
 
     logger = logging.getLogger("synced_event_handler")
 
@@ -161,41 +162,47 @@ class BaseThreadedEventHandler(
     event_timeout.
     """
 
+    __event_listener_type__ = SyncedEventListener
+
     event_type_name_prefix: str = ""
     logger = logging.getLogger("threaded_event_handler")
 
-    _max_task_threads = 12
-    _max_consumer_threads = 4
+    _max_threads = 8
 
-    def __init__(self, event_timeout: float = 30.0):
+    def __init__(self, event_timeout: float = 10.0):
         super().__init__()
 
         self.event_timeout = event_timeout
-
-        self.__task_pool = self.__create_pool_tasks()
-        self.__consumer_pool = self.__create_pool_consumers()
-        self.__tasks_pending: List[Tuple[LT, ET, cfutures.Future]] = list()
+        self._pool = cfutures.ThreadPoolExecutor(
+            max_workers=self._max_threads,
+            thread_name_prefix=f"{self._event_type_name_}_tasks",
+        )
 
     def dispatch(self, event: ET, **kwargs) -> int:
-        count = super().dispatch(event, _event=event, **kwargs)
+        with cfutures.ThreadPoolExecutor(
+            max_workers=self._max_threads,
+            thread_name_prefix=f"{self._event_type_name_}_{event}_tasks",
+        ) as pool:
+            waiters_future = pool.submit(self._notify_waiters, event, **kwargs)
+
+            listener_futures = []
+            if event not in self._ignored_events:
+                for listener in self.get_listeners(event):
+                    listener_futures.append(pool.submit(
+                        self._dispatch_listener,
+                        event, listener, **kwargs
+                    ))
+
+            count = waiters_future.result(self.event_timeout) + len(listener_futures)
+            for listener_future in listener_futures:
+                listener_future.result(self.event_timeout)
+
         if not count:
             self.logger.error(
                 f"no listeners for {self._event_type_name} '%s'", event
             )
-        else:
-            try:
-                self.__consumer_pool.submit(self._task_consumer)
-            except RuntimeError as e:
-                self.logger.error(f"Failed to dispatch '{event}': %s", str(e))
 
         return count
-
-    def shutdown(self):
-        self.__consumer_pool.shutdown()
-        self.__task_pool.shutdown(wait=False, cancel_futures=True)  # noqa
-
-        self.__consumer_pool = self.__create_pool_consumers()
-        self.__task_pool = self.__create_pool_tasks()
 
     @property
     def _event_type_name(self) -> str:
@@ -209,69 +216,7 @@ class BaseThreadedEventHandler(
         return self._event_type_name.replace(" ", "_")
 
     def _dispatch_listener(self, event: ET, listener: LT, **kwargs):
-        with self._event_lock:
-            try:
-                future = self.__task_pool.submit(listener, **kwargs)
-                self.__tasks_pending.append((listener, event, future))
-            except RuntimeError:
-                pass
-
-    def _handle_predicate_exception(self, event: ET, exception: BaseException):
-        self.logger.exception(
-            f"{self._event_type_name} '{event}' waiter "
-            f"predicate raised an exception: {exception}"
-        )
-
-    def _handle_listener_timeout(self, listener: LT, event: ET):
-        exception = TimeoutError(f"{self._event_type_name} listener timeout")
-        self._handle_listener_exception(listener, event, exception)
-
-    def _task_consumer(self):
-        """
-        Waits for new futures and logs potential cancels, exceptions
-        and timeouts.
-        """
-        with self._event_lock:
-            listeners, events, futures = zip(*self.__tasks_pending)
-            self.__tasks_pending.clear()
-
-        try:
-            for listener, event, future in zip(
-                listeners,
-                events,
-                cfutures.as_completed(futures, self.event_timeout),
-            ):
-                try:
-                    future.result()
-                except cfutures.CancelledError:
-                    self.logger.warning(
-                        f"{self._event_type_name} listener '%s' for event '%s' "
-                        f"was cancelled",
-                        str(listener),
-                        str(event),
-                    )
-                except Exception as e:
-                    self._handle_listener_exception(listener, event, e)
-
-        except cfutures.TimeoutError:
-            for listener, event, future in zip(listeners, events, futures):
-                if future.done():
-                    continue
-
-                future.cancel()
-                self._handle_listener_timeout(listener, event)
-
-    def __create_pool_tasks(self):
-        return cfutures.ThreadPoolExecutor(
-            max_workers=self._max_task_threads,
-            thread_name_prefix=f"{self._event_type_name_}_listeners",
-        )
-
-    def __create_pool_consumers(self):
-        return cfutures.ThreadPoolExecutor(
-            max_workers=self._max_consumer_threads,
-            thread_name_prefix=f"{self._event_type_name_}_consumers",
-        )
+        return listener(_event=event, **kwargs)
 
 
 SyncedEventHandler = BaseSyncedEventHandler[

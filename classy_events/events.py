@@ -138,7 +138,7 @@ class BaseEventHandler(Generic[LT, ET, FT]):
 
         self.__unique_events: Set[ET] = set()
         self.__unique_events_bound: Dict[ET, Set[T]] = ddict(set)
-        self.__ignored_events: Set[ET] = set()
+        self._ignored_events: Set[ET] = set()
 
         # type -> listener method name -> listener
         #  the default for missing owners is a chainmap child of the parent
@@ -153,7 +153,10 @@ class BaseEventHandler(Generic[LT, ET, FT]):
         self.__owner_instances: Dict[Type[T], weakref.WeakSet[T]] = ddict(wset)
 
     def __init_subclass__(cls, event_listener: Optional[Type[LT]] = None):
-        if bases := getattr(cls, "__orig_bases__", None):
+        if (
+                getattr(cls, "__event_listener_type__", None) is None
+                and (bases := getattr(cls, "__orig_bases__", None))
+        ):
             # gotta love python 3.8
             cls.__event_listener_type__ = get_args(bases[0])[0]
         elif event_listener:
@@ -207,17 +210,17 @@ class BaseEventHandler(Generic[LT, ET, FT]):
         Temporarily ignores event dispatching to the listeners.
         """
         _events = frozenset(events)
-        if duplicates := self.__ignored_events & _events:
+        if duplicates := self._ignored_events & _events:
             raise ValueError(
                 "events " + ", ".join(duplicates) + " already ignored"
             )
 
-        self.__ignored_events |= _events
+        self._ignored_events |= _events
 
         try:
             yield
         finally:
-            self.__ignored_events -= _events
+            self._ignored_events -= _events
 
     def get_future_event(
         self,
@@ -315,7 +318,7 @@ class BaseEventHandler(Generic[LT, ET, FT]):
         """
         count = self._notify_waiters(event, **kwargs)
         for listener in self.get_listeners(event):
-            if event not in self.__ignored_events:
+            if event not in self._ignored_events:
                 self._dispatch_listener(event, listener, **kwargs)
             count += 1
         return count
