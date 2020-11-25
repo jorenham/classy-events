@@ -19,9 +19,10 @@ from typing import (
     ContextManager,
     Dict,
     Generic,
-    List,
+    Iterator,
+    Optional,
     TypeVar,
-    Union, Iterator,
+    Union,
 )
 
 from .events import BaseEventHandler, EventListener
@@ -33,8 +34,11 @@ FT = TypeVar("FT", bound=Callable[..., Any])
 LT = TypeVar("LT", bound="SyncedEventListener")  # noqa
 TLT = TypeVar("TLT", bound="ThreadedEventListener")  # noqa
 HT = TypeVar("HT", bound="BaseSyncedEventHandler")  # noqa
+THT = TypeVar("THT", bound="BaseThreadedEventHandler")  # noqa
 HT_co = TypeVar("HT_co", bound="BaseSyncedEventHandler", covariant=True)  # noqa
-THT_co = TypeVar("THT_co", bound="BaseThreadedEventHandler", covariant=True)  # noqa
+THT_co = TypeVar(
+    "THT_co", bound="BaseThreadedEventHandler", covariant=True
+)  # noqa
 
 Lockable = ContextManager[bool]
 
@@ -81,8 +85,6 @@ class BaseSyncedEventHandler(BaseEventHandler[LT, ET, FT], Generic[LT, ET, FT]):
     Syncs events with an optionally specified scopes.
     Useful when the events are dispatch in different threads.
     """
-
-    __event_listener_type__ = SyncedEventListener
 
     logger = logging.getLogger("synced_event_handler")
 
@@ -132,15 +134,17 @@ class BaseSyncedEventHandler(BaseEventHandler[LT, ET, FT], Generic[LT, ET, FT]):
             )
 
 
-class ThreadedEventListener(SyncedEventListener[ET, FT, HT], Generic[ET, FT, HT]):
+class ThreadedEventListener(
+    SyncedEventListener[ET, FT, HT], Generic[ET, FT, HT]
+):
     def __init__(
-            self,
-            function,
-            *,
-            handler: HT,
-            sync: Union[bool, str] = None,
-            deferred: bool = False,
-            **kwargs
+        self,
+        function,
+        *,
+        handler: HT,
+        sync: Union[bool, str] = None,
+        deferred: bool = False,
+        **kwargs,
     ):
         super().__init__(
             function, handler=handler, sync=sync, deferred=deferred, **kwargs
@@ -163,8 +167,6 @@ class BaseThreadedEventHandler(
     event_timeout.
     """
 
-    __event_listener_type__ = ThreadedEventListener
-
     event_type_name_prefix: str = ""
     logger = logging.getLogger("threaded_event_handler")
 
@@ -182,24 +184,31 @@ class BaseThreadedEventHandler(
         self.__lock = threading.RLock()
 
     def on(
-            self,
-            *events: ET,
-            unique: bool = False,
-            sync: Union[None, bool, str] = None,
-            deferred: bool = False,
-            **kwargs,
+        self,
+        *events: ET,
+        unique: bool = False,
+        sync: Union[None, bool, str] = None,
+        deferred: bool = False,
+        **kwargs,
     ) -> Callable[[Callable], LT]:
         return super().on(
             *events, unique=unique, sync=sync, deferred=deferred, **kwargs
         )
 
-    def collect_deferred(self, timeout=None) -> Iterator[cfutures.Future]:
+    def collect_deferred(
+        self, timeout: Optional[float] = None, cancelled: bool = False
+    ) -> Iterator[cfutures.Future]:
         with self.__lock:
             _tasks = self.__tasks.copy()
             self.__tasks = []
 
-        for future in cfutures.as_completed(_tasks, timeout):
-            yield future
+        try:
+            for future in cfutures.as_completed(_tasks, timeout):
+                if not cancelled and future.cancelled():
+                    continue
+                yield future
+        except cfutures.TimeoutError as e:
+            raise TimeoutError from e
 
     def wait(self, timeout=None, shutdown_on_raise=True):
         try:
@@ -217,10 +226,11 @@ class BaseThreadedEventHandler(
             self._pool.shutdown(wait=wait)
             self._pool = None
 
-    def _dispatch_listener(self, event: ET, listener: ThreadedEventListener,
-                           **kwargs):
+    def _dispatch_listener(
+        self, event: ET, listener: ThreadedEventListener, **kwargs
+    ):
         if not self._pool:
-            self.logger.error('cannot dispatch events after shutdown')
+            self.logger.error("cannot dispatch events after shutdown")
             return
 
         with self.__lock:
@@ -234,12 +244,15 @@ class BaseThreadedEventHandler(
                 )
 
 
-SyncedEventHandler = BaseSyncedEventHandler[
-    SyncedEventListener[ET, FT, HT_co], ET, FT
-]
-SyncedEventHandler.__doc__ = BaseSyncedEventHandler.__doc__
+class SyncedEventHandler(
+    BaseSyncedEventHandler[SyncedEventListener[ET, FT, HT], ET, FT],
+    event_listener=SyncedEventListener[ET, FT, HT],
+):
+    pass
 
-ThreadedEventHandler = BaseThreadedEventHandler[
-    ThreadedEventListener[ET, FT, THT_co], ET, FT
-]
-ThreadedEventHandler.__doc__ = BaseThreadedEventHandler.__doc__
+
+class ThreadedEventHandler(
+    BaseThreadedEventHandler[ThreadedEventListener[ET, FT, THT], ET, FT],
+    event_listener=ThreadedEventListener[ET, FT, THT],
+):
+    pass

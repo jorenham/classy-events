@@ -24,7 +24,6 @@ from typing import (
     TypeVar,
     Union,
     cast,
-    get_args,
 )
 
 from classy_decorators import Decorator
@@ -152,17 +151,13 @@ class BaseEventHandler(Generic[LT, ET, FT]):
         # type -> weakly referenced set of instances
         self.__owner_instances: Dict[Type[T], weakref.WeakSet[T]] = ddict(wset)
 
-    def __init_subclass__(cls, event_listener: Optional[Type[LT]] = None):
-        if (
-                getattr(cls, "__event_listener_type__", None) is None
-                and (bases := getattr(cls, "__orig_bases__", None))
-        ):
-            # gotta love python 3.8
-            cls.__event_listener_type__ = get_args(bases[0])[0]
-        elif event_listener:
-            cls.__event_listener_type__ = event_listener
-
+    def __init_subclass__(
+        cls, *, event_listener: Optional[Type[LT]] = None, **kwargs
+    ):
         super().__init_subclass__()
+
+        if event_listener:
+            cls.__event_listener_type__ = event_listener
 
     @property
     def events(self) -> FrozenSet[ET]:
