@@ -21,7 +21,7 @@ from typing import (
     Generic,
     List,
     TypeVar,
-    Union,
+    Union, Iterator,
 )
 
 from .events import BaseEventHandler, EventListener
@@ -203,7 +203,7 @@ class BaseThreadedEventHandler(
         )
 
         self.__tasks = []
-        self.__lock = threading.Lock()
+        self.__lock = threading.RLock()
 
     def on(
             self,
@@ -217,13 +217,18 @@ class BaseThreadedEventHandler(
             *events, unique=unique, sync=sync, deferred=deferred, **kwargs
         )
 
+    def collect_deferred(self, timeout=None) -> Iterator[cfutures.Future]:
+        with self.__lock:
+            _tasks = self.__tasks.copy()
+            self.__tasks = []
+
+        for future in cfutures.as_completed(_tasks, timeout):
+            yield future
+
     def wait(self, timeout=None, shutdown_on_raise=True):
         try:
-            with self.__lock:
-                for future in cfutures.as_completed(self.__tasks, timeout):
-                    future.result()
-
-            self.__tasks = []
+            for future in self.collect_deferred(timeout):
+                future.result()
         finally:
             if shutdown_on_raise:
                 self.shutdown(wait=False)
@@ -236,7 +241,8 @@ class BaseThreadedEventHandler(
             self._pool.shutdown(wait=wait)
             self._pool = None
 
-    def _dispatch_listener(self, event: ET, listener: ThreadedEventListener, **kwargs):
+    def _dispatch_listener(self, event: ET, listener: ThreadedEventListener,
+                           **kwargs):
         if not self._pool:
             self.logger.error('cannot dispatch events after shutdown')
             return
