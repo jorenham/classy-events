@@ -213,9 +213,6 @@ class BaseThreadedEventHandler(
             deferred: bool = False,
             **kwargs,
     ) -> Callable[[Callable], LT]:
-        if sync and deferred:
-            raise ValueError('cannot have both sync and deferred set')
-
         return super().on(
             *events, unique=unique, sync=sync, deferred=deferred, **kwargs
         )
