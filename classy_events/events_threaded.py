@@ -186,14 +186,17 @@ class BaseThreadedEventHandler(
             waiters_future = pool.submit(self._notify_waiters, event, **kwargs)
 
             listener_futures = []
-            if event not in self._ignored_events:
-                for listener in self.get_listeners(event):
+            count = 0
+            for listener in self.get_listeners(event):
+                if event not in self._ignored_events:
                     listener_futures.append(pool.submit(
                         self._dispatch_listener,
                         event, listener, **kwargs
                     ))
+                count += 1
 
-            count = waiters_future.result(self.event_timeout) + len(listener_futures)
+            count += waiters_future.result(self.event_timeout)
+
             for listener_future in listener_futures:
                 listener_future.result(self.event_timeout)
 
