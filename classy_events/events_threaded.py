@@ -215,9 +215,10 @@ class BaseThreadedEventHandler(
         try:
             for future in self.collect_deferred(timeout):
                 future.result()
-        finally:
+        except Exception:
             if shutdown_on_raise:
                 self.shutdown(wait=False)
+            raise
 
     def shutdown(self, wait=True):
         with self.__lock:
