@@ -5,6 +5,7 @@ __all__ = [
     "BaseThreadedEventHandler",
     "SyncedEventListener",
     "SyncedEventHandler",
+    "ThreadedEventListener",
     "ThreadedEventHandler",
 ]
 
