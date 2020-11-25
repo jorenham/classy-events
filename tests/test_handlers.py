@@ -1,11 +1,18 @@
 import pytest
 
-from classy_events import events
+from classy_events import events, events_threaded
 
 
-def test_function_listener_basic():
-    event_handler = events.EventHandler()
+@pytest.fixture(params=[
+    events.EventHandler,
+    events_threaded.SyncedEventHandler,
+    events_threaded.ThreadedEventHandler,
+], ids=['EventHandler', 'SyncedEventHandler', 'ThreadedEventHandler'])
+def event_handler(request):
+    return request.param()
 
+
+def test_function_listener_basic(event_handler):
     @event_handler.on("spam")
     def spam(items):
         items.append("eggs")
@@ -15,9 +22,7 @@ def test_function_listener_basic():
     assert "eggs" in things
 
 
-def test_function_listener_multiple():
-    event_handler = events.EventHandler()
-
+def test_function_listener_multiple(event_handler):
     @event_handler.on("spam")
     def spam(items):
         items.append("eggs")
@@ -32,9 +37,7 @@ def test_function_listener_multiple():
     assert "ham" in things
 
 
-def test_function_listener_unique():
-    event_handler = events.EventHandler()
-
+def test_function_listener_unique(event_handler):
     @event_handler.on("spam")
     def spam(items):
         items.append("eggs")
@@ -46,9 +49,7 @@ def test_function_listener_unique():
             items.append("ham")
 
 
-def test_method_listener_basic():
-    event_handler = events.EventHandler()
-
+def test_method_listener_basic(event_handler):
     class Spam:
         def __init__(self, items):
             self.items = items
@@ -69,9 +70,7 @@ def test_method_listener_basic():
     assert "eggs" in things
 
 
-def test_method_listener_refererence():
-    event_handler = events.EventHandler()
-
+def test_method_listener_refererence(event_handler):
     class Spam:
         @event_handler.on("spam")
         def spam(self):
@@ -90,9 +89,7 @@ def test_method_listener_refererence():
     assert len(event_handler._instances) == 0
 
 
-def test_method_listener_rebind():
-    event_handler = events.EventHandler()
-
+def test_method_listener_rebind(event_handler):
     class Spam:
         def __init__(self, items):
             self.items = items
@@ -130,9 +127,7 @@ def test_method_listener_rebind():
     assert len(spam_things) == 2
 
 
-def test_method_listener_multiple():
-    event_handler = events.EventHandler()
-
+def test_method_listener_multiple(event_handler):
     class Spam:
         def __init__(self, items):
             self.items = items
@@ -162,9 +157,7 @@ def test_method_listener_multiple():
     assert "eggs" in things
 
 
-def test_method_listener_unique_ok():
-    event_handler = events.EventHandler()
-
+def test_method_listener_unique_ok(event_handler):
     class Spam:
         @event_handler.on("spam", unique=True)
         def spam(self):
@@ -179,9 +172,7 @@ def test_method_listener_unique_ok():
     assert True  # no exception raised
 
 
-def test_method_listener_unique_error():
-    event_handler = events.EventHandler()
-
+def test_method_listener_unique_error(event_handler):
     class Spam:
         @event_handler.on("spam", unique=True)
         def spam(self):
@@ -197,9 +188,7 @@ def test_method_listener_unique_error():
         event_handler.bind(spam)
 
 
-def test_method_listener_inheritance():
-    event_handler = events.EventHandler()
-
+def test_method_listener_inheritance(event_handler):
     class Spam:
         def __init__(self, items):
             self.items = items
@@ -241,9 +230,7 @@ def test_method_listener_inheritance():
     assert "bacon" in things
 
 
-def test_combined_listeners():
-    event_handler = events.EventHandler()
-
+def test_combined_listeners(event_handler):
     @event_handler.on("spam")
     def spam(items):
         items.append("spam_function")
@@ -282,9 +269,7 @@ def test_combined_listeners():
     assert "ham_method" in things
 
 
-def test_combined_listeners_unqiue_ok():
-    event_handler = events.EventHandler()
-
+def test_combined_listeners_unqiue_ok(event_handler):
     @event_handler.on("eggs", unique=True)
     def eggs():
         ...
@@ -299,9 +284,7 @@ def test_combined_listeners_unqiue_ok():
     assert True  # no exception raised
 
 
-def test_combined_listeners_unqiue_error_at_bind():
-    event_handler = events.EventHandler()
-
+def test_combined_listeners_unqiue_error_at_bind(event_handler):
     @event_handler.on("spam", unique=True)
     def spam_function():
         ...
@@ -316,9 +299,7 @@ def test_combined_listeners_unqiue_error_at_bind():
         event_handler.bind(spam)
 
 
-def test_combined_listeners_unqiue_error_at_function():
-    event_handler = events.EventHandler()
-
+def test_combined_listeners_unqiue_error_at_function(event_handler):
     class Spam:
         @event_handler.on("spam", unique=True)
         def spam_method(self):
@@ -334,9 +315,7 @@ def test_combined_listeners_unqiue_error_at_function():
             ...
 
 
-def test_future_event():
-    event_handler = events.EventHandler()
-
+def test_future_event(event_handler):
     class Spam:
         @event_handler.on("spam")
         def spam(self, ham):
@@ -354,9 +333,7 @@ def test_future_event():
     assert future.result() == dict(ham=True)
 
 
-def test_future_event_error():
-    event_handler = events.EventHandler()
-
+def test_future_event_error(event_handler):
     class Spam:
         @event_handler.on("spam")
         def spam(self, ham):
@@ -373,9 +350,7 @@ def test_future_event_error():
     assert future.result() == dict(ham="ham")
 
 
-def test_future_event_predicate_error():
-    event_handler = events.EventHandler()
-
+def test_future_event_predicate_error(event_handler):
     class Spam:
         @event_handler.on("spam")
         def spam(self, ham):
@@ -396,9 +371,7 @@ def test_future_event_predicate_error():
         future.result()
 
 
-def test_ignore():
-    event_handler = events.EventHandler()
-
+def test_ignore(event_handler):
     class Spam:
         def __init__(self, items):
             self.items = items
