@@ -31,8 +31,10 @@ ET = TypeVar("ET")  # event type
 FT = TypeVar("FT", bound=Callable[..., Any])
 
 LT = TypeVar("LT", bound="SyncedEventListener")  # noqa
+TLT = TypeVar("TLT", bound="ThreadedEventListener")  # noqa
 HT = TypeVar("HT", bound="BaseSyncedEventHandler")  # noqa
 HT_co = TypeVar("HT_co", bound="BaseSyncedEventHandler", covariant=True)  # noqa
+THT_co = TypeVar("THT_co", bound="BaseThreadedEventHandler", covariant=True)  # noqa
 
 Lockable = ContextManager[bool]
 
@@ -154,72 +156,103 @@ class BaseSyncedEventHandler(BaseEventHandler[LT, ET, FT], Generic[LT, ET, FT]):
             )
 
 
+class ThreadedEventListener(SyncedEventListener[ET, FT, HT], Generic[ET, FT, HT]):
+    def __init__(
+            self,
+            function,
+            *,
+            handler: HT,
+            sync: Union[bool, str] = None,
+            deferred: bool = False,
+            **kwargs
+    ):
+        super().__init__(
+            function, handler=handler, sync=sync, deferred=deferred, **kwargs
+        )
+
+        self.deferred = deferred
+
+    def __call__(self, *args, _pool, **kwargs):
+        if self.deferred:
+            return _pool.submit(super().__call__, *args, **kwargs)
+        else:
+            return super().__call__(*args, **kwargs)
+
+
 class BaseThreadedEventHandler(
-    BaseSyncedEventHandler[LT, ET, FT], Generic[LT, ET, FT]
+    BaseSyncedEventHandler[TLT, ET, FT], Generic[TLT, ET, FT]
 ):
     """
     Runs each event listener in a separate thread and cancels it after the
     event_timeout.
     """
 
-    __event_listener_type__ = SyncedEventListener
+    __event_listener_type__ = ThreadedEventListener
 
     event_type_name_prefix: str = ""
     logger = logging.getLogger("threaded_event_handler")
 
-    _max_threads = 8
-
-    def __init__(self, event_timeout: float = 10.0):
+    def __init__(self, max_workers=None):
         super().__init__()
 
-        self.event_timeout = event_timeout
+        self._max_workers = max_workers
+
         self._pool = cfutures.ThreadPoolExecutor(
-            max_workers=self._max_threads,
-            thread_name_prefix=f"{self._event_type_name_}_tasks",
+            max_workers=self._max_workers,
+            thread_name_prefix=f"{type(self).__name__}_deferred_tasks",
         )
 
-    def dispatch(self, event: ET, **kwargs) -> int:
-        with cfutures.ThreadPoolExecutor(
-            max_workers=self._max_threads,
-            thread_name_prefix=f"{self._event_type_name_}_{event}_tasks",
-        ) as pool:
-            waiters_future = pool.submit(self._notify_waiters, event, **kwargs)
+        self.__tasks = []
+        self.__lock = threading.Lock()
 
-            listener_futures = []
-            count = 0
-            for listener in self.get_listeners(event):
-                if event not in self._ignored_events:
-                    listener_futures.append(pool.submit(
-                        self._dispatch_listener,
-                        event, listener, **kwargs
-                    ))
-                count += 1
+    def on(
+            self,
+            *events: ET,
+            unique: bool = False,
+            sync: Union[None, bool, str] = None,
+            deferred: bool = False,
+            **kwargs,
+    ) -> Callable[[Callable], LT]:
+        if sync and deferred:
+            raise ValueError('cannot have both sync and deferred set')
 
-            count += waiters_future.result(self.event_timeout)
+        return super().on(
+            *events, unique=unique, sync=sync, deferred=deferred, **kwargs
+        )
 
-            for listener_future in listener_futures:
-                listener_future.result(self.event_timeout)
+    def wait(self, timeout=None, shutdown_on_raise=True):
+        try:
+            with self.__lock:
+                for future in cfutures.as_completed(self.__tasks, timeout):
+                    future.result()
 
-        if not count:
-            self.logger.error(
-                f"no listeners for {self._event_type_name} '%s'", event
-            )
+            self.__tasks = []
+        finally:
+            if shutdown_on_raise:
+                self.shutdown(wait=False)
 
-        return count
+    def shutdown(self, wait=True):
+        with self.__lock:
+            if not self._pool:
+                return
 
-    @property
-    def _event_type_name(self) -> str:
-        if self.event_type_name_prefix:
-            return " ".join((self.event_type_name_prefix, "event"))
-        else:
-            return "event"
+            self._pool.shutdown(wait=wait)
+            self._pool = None
 
-    @property
-    def _event_type_name_(self) -> str:
-        return self._event_type_name.replace(" ", "_")
+    def _dispatch_listener(self, event: ET, listener: ThreadedEventListener, **kwargs):
+        if not self._pool:
+            self.logger.error('cannot dispatch events after shutdown')
+            return
 
-    def _dispatch_listener(self, event: ET, listener: LT, **kwargs):
-        return listener(_event=event, **kwargs)
+        with self.__lock:
+            if listener.deferred:
+                self.__tasks.append(
+                    listener(_event=event, _pool=self._pool, **kwargs)
+                )
+            else:
+                return super()._dispatch_listener(
+                    event, listener, _pool=self._pool, **kwargs
+                )
 
 
 SyncedEventHandler = BaseSyncedEventHandler[
@@ -228,6 +261,6 @@ SyncedEventHandler = BaseSyncedEventHandler[
 SyncedEventHandler.__doc__ = BaseSyncedEventHandler.__doc__
 
 ThreadedEventHandler = BaseThreadedEventHandler[
-    SyncedEventListener[ET, FT, HT_co], ET, FT
+    ThreadedEventListener[ET, FT, THT_co], ET, FT
 ]
 ThreadedEventHandler.__doc__ = BaseThreadedEventHandler.__doc__
