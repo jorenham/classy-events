@@ -231,11 +231,11 @@ class BaseThreadedEventHandler(
     def _dispatch_listener(
         self, event: ET, listener: ThreadedEventListener, **kwargs
     ):
-        if not self._pool:
-            self.logger.error("cannot dispatch events after shutdown")
-            return
-
         with self.__lock:
+            if not self._pool:
+                self.logger.error("cannot dispatch events after shutdown")
+                return
+
             if listener.deferred:
                 self.__tasks.append(
                     listener(_event=event, _pool=self._pool, **kwargs)
