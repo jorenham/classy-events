@@ -20,6 +20,7 @@ from typing import (
     ContextManager,
     Dict,
     Generic,
+    Iterable,
     Iterator,
     Optional,
     TypeVar,
@@ -143,21 +144,51 @@ class ThreadedEventListener(
         function,
         *,
         handler: HT,
+        events: Iterable[ET],
         sync: Union[bool, str] = None,
         deferred: bool = False,
+        max_workers: Optional[int] = None,
+        _pool=None,
         **kwargs,
     ):
+        if deferred:
+            if _pool is None:
+                events = list(events)
+                events_repr = ", ".join(map(str, events))
+                _pool = cfutures.ThreadPoolExecutor(
+                    max_workers=max_workers,
+                    thread_name_prefix=f"{type(self).__name__}({events_repr})",
+                )
+
         super().__init__(
-            function, handler=handler, sync=sync, deferred=deferred, **kwargs
+            function,
+            handler=handler,
+            events=events,
+            sync=sync,
+            deferred=deferred,
+            max_workers=max_workers,
+            _pool=_pool,
+            **kwargs,
         )
 
         self.deferred = deferred
+        self._pool: Optional[cfutures.ThreadPoolExecutor] = _pool
 
-    def __call__(self, *args, _pool, **kwargs):
+        self.__lock = threading.RLock()
+
+    def __call__(self, *args, **kwargs):
         if self.deferred:
-            return _pool.submit(super().__call__, *args, **kwargs)
+            with self.__lock:
+                return self._pool.submit(super().__call__, *args, **kwargs)
         else:
             return super().__call__(*args, **kwargs)
+
+    def shutdown(self, wait=True):
+        if not self.deferred:
+            return
+
+        with self.__lock:
+            self._pool.shutdown(wait=wait)
 
 
 class BaseThreadedEventHandler(
@@ -171,15 +202,10 @@ class BaseThreadedEventHandler(
     event_type_name_prefix: str = ""
     logger = logging.getLogger("threaded_event_handler")
 
-    def __init__(self, max_workers=None):
+    def __init__(self, max_workers_per_event=None):
         super().__init__()
 
-        self._max_workers = max_workers
-
-        self._pool = cfutures.ThreadPoolExecutor(
-            max_workers=self._max_workers,
-            thread_name_prefix=f"{type(self).__name__}_deferred_tasks",
-        )
+        self._max_workers = max_workers_per_event
 
         self.__tasks = []
         self.__lock = threading.RLock()
@@ -190,10 +216,17 @@ class BaseThreadedEventHandler(
         unique: bool = False,
         sync: Union[None, bool, str] = None,
         deferred: bool = False,
+        max_workers: Optional[int] = None,
         **kwargs,
     ) -> Callable[[Callable], LT]:
+        max_workers = max_workers or self._max_workers
         return super().on(
-            *events, unique=unique, sync=sync, deferred=deferred, **kwargs
+            *events,
+            unique=unique,
+            sync=sync,
+            deferred=deferred,
+            max_workers=max_workers,
+            **kwargs,
         )
 
     def collect_deferred(
@@ -222,28 +255,26 @@ class BaseThreadedEventHandler(
 
     def shutdown(self, wait=True):
         with self.__lock:
-            if not self._pool:
-                return
-
-            self._pool.shutdown(wait=wait)
-            self._pool = None
+            for listener in self.listeners:
+                listener.shutdown(wait=wait)
 
     def _dispatch_listener(
         self, event: ET, listener: ThreadedEventListener, **kwargs
     ):
-        with self.__lock:
-            if not self._pool:
-                self.logger.error("cannot dispatch events after shutdown")
-                return
+        if listener.deferred:
+            with self.__lock:
+                try:
+                    future = listener(_event=event, **kwargs)
+                except RuntimeError:
+                    self.logger.error(
+                        "cannot dispatch events after shutdown of '%s'",
+                        str(event),
+                    )
 
-            if listener.deferred:
-                self.__tasks.append(
-                    listener(_event=event, _pool=self._pool, **kwargs)
-                )
-            else:
-                return super()._dispatch_listener(
-                    event, listener, _pool=self._pool, **kwargs
-                )
+                self.__tasks.append(future)
+                return future
+        else:
+            return listener(_event=event, **kwargs)
 
 
 class SyncedEventHandler(
