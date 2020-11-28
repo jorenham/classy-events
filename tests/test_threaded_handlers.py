@@ -7,7 +7,9 @@ from classy_events import events_threaded as events
 
 @pytest.fixture
 def event_handler(request):
-    return events.ThreadedEventHandler()
+    _event_handler = events.ThreadedEventHandler()
+    yield _event_handler
+    _event_handler.shutdown()
 
 
 def test_defer(event_handler):
@@ -68,13 +70,12 @@ def test_collect(event_handler):
         future_third.result()
 
     with pytest.raises(TimeoutError):
-        future_fourth = next(futures)
+        _ = next(futures)
     dt_fourth = time.time() - t0
 
     with pytest.raises(StopIteration):
         next(futures)
 
     event_handler.wait()
-    dt = time.time() - t0
 
     assert 0.1 < dt_first < dt_second < dt_third < dt_fourth < 0.7

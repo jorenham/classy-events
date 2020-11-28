@@ -255,8 +255,9 @@ class BaseThreadedEventHandler(
 
     def shutdown(self, wait=True):
         with self.__lock:
-            for listener in self.listeners:
-                listener.shutdown(wait=wait)
+            for listeners in self.listeners.values():
+                for listener in listeners:
+                    listener.shutdown(wait=wait)
 
     def _dispatch_listener(
         self, event: ET, listener: ThreadedEventListener, **kwargs
