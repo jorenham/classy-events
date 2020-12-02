@@ -263,17 +263,19 @@ class BaseThreadedEventHandler(
         self, event: ET, listener: ThreadedEventListener, **kwargs
     ):
         if listener.deferred:
-            with self.__lock:
-                try:
-                    future = listener(_event=event, **kwargs)
-                except RuntimeError:
-                    self.logger.error(
-                        "cannot dispatch events after shutdown of '%s'",
-                        str(event),
-                    )
+            try:
+                future = listener(_event=event, **kwargs)
+            except RuntimeError:
+                self.logger.error(
+                    "cannot dispatch events after shutdown of '%s'",
+                    str(event),
+                )
+                return None
 
+            with self.__lock:
                 self.__tasks.append(future)
-                return future
+
+            return future
         else:
             return listener(_event=event, **kwargs)
 
