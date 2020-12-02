@@ -3,11 +3,14 @@ import pytest
 from classy_events import events, events_threaded
 
 
-@pytest.fixture(params=[
-    events.EventHandler,
-    events_threaded.SyncedEventHandler,
-    events_threaded.ThreadedEventHandler,
-], ids=['EventHandler', 'SyncedEventHandler', 'ThreadedEventHandler'])
+@pytest.fixture(
+    params=[
+        events.EventHandler,
+        events_threaded.SyncedEventHandler,
+        events_threaded.ThreadedEventHandler,
+    ],
+    ids=["EventHandler", "SyncedEventHandler", "ThreadedEventHandler"],
+)
 def event_handler(request):
     return request.param()
 
