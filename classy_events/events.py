@@ -369,8 +369,8 @@ class BaseEventHandler(Generic[LT, ET, FT]):
                         f"event '{unique_event}' is unique but has multiple "
                         f"listeners: "
                         + ", ".join(
-                            l.__qualname__ for l in double_listeners  # noqa
-                        )
+                            dl.__qualname__ for dl in double_listeners
+                        )  # noqa
                         + " and "
                         + listener.__qualname__
                     )

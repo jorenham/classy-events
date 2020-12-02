@@ -66,9 +66,9 @@ class SyncedEventListener(EventListener[ET, FT, HT], Generic[ET, FT, HT]):
 
             self._sync_locks = {}
             for event, scope in sync_scopes.items():
-                self._sync_locks[event] = self.handler._sync_locks[  # noqa
+                self._sync_locks[event] = self.handler._sync_locks[
                     scope
-                ]
+                ]  # noqa
                 self.handler._sync_scopes[event] = scope  # noqa
 
         else:
