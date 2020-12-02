@@ -22,6 +22,7 @@ from typing import (
     Generic,
     Iterable,
     Iterator,
+    List,
     Optional,
     TypeVar,
     Union,
@@ -207,7 +208,7 @@ class BaseThreadedEventHandler(
 
         self._max_workers = max_workers_per_event
 
-        self.__tasks = []
+        self.__tasks: List[cfutures.Future] = []
         self.__lock = threading.RLock()
 
     def on(
@@ -242,6 +243,10 @@ class BaseThreadedEventHandler(
                     continue
                 yield future
         except cfutures.TimeoutError as e:
+            for task in _tasks:
+                if task.running():
+                    task.cancel()
+
             raise TimeoutError from e
 
     def wait(self, timeout=None, shutdown_on_raise=True):
@@ -255,9 +260,16 @@ class BaseThreadedEventHandler(
 
     def shutdown(self, wait=True):
         with self.__lock:
+            if not wait:
+                for task in self.__tasks:
+                    if task.running():
+                        task.cancel()
+
             for listeners in self.listeners.values():
                 for listener in listeners:
                     listener.shutdown(wait=wait)
+
+            self.__tasks = []
 
     def _dispatch_listener(
         self, event: ET, listener: ThreadedEventListener, **kwargs
