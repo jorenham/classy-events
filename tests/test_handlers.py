@@ -204,18 +204,18 @@ def test_method_listener_inheritance(event_handler):
         def eggs(self):
             self.items.append("eggs")
 
+    class Bacon:
+        def __init__(self, items):
+            self.items = items
+
         @event_handler.on("bacon")
         def bacon(self):
             self.items.append("bacon")
 
-    class Ham(Spam):
+    class Ham(Spam, Bacon):
         @event_handler.on("spam")
         def spam(self):
             self.items.append("hamspam")
-
-        @event_handler.on("eggs")
-        def eggs(self):
-            self.items.append("hameggs")
 
     event_handler.bind_owner(Ham)
 
@@ -227,7 +227,7 @@ def test_method_listener_inheritance(event_handler):
     assert "hamspam" in things
 
     assert event_handler.dispatch("eggs") == 1
-    assert "hameggs" in things
+    assert "eggs" in things
 
     assert event_handler.dispatch("bacon") == 1
     assert "bacon" in things

@@ -430,12 +430,19 @@ class BaseEventHandler(Generic[LT, ET, FT]):
 
     def _get_owner_listeners(self, event: ET, owner: Type[T]) -> Iterator[LT]:
         _names = set()
+        _i = 0
         for name, listener in self.__owner_listener_map[owner].items():
             assert name not in _names  # should not happen in chainmaps
             _names.add(name)
 
             if event in listener.events:
                 yield listener
+                _i += 1
+
+        if not _i:
+            for owner_parent in owner.mro()[1:]:
+                if owner_parent in self._owners:
+                    yield from self._get_owner_listeners(event, owner_parent)
 
     def _get_event_owners(self, event: ET) -> Iterator[Type[T]]:
         _owners = set()
